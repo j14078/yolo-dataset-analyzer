@@ -18,6 +18,7 @@ sys.path.append(str(project_root))
 
 from analyzer.estimator import BeginnerFriendlyYOLOEstimator
 from utils.file_utils import validate_folder_structure, get_folder_summary
+from converter.yolo_converter import YOLOConverter
 
 
 def main():
@@ -31,12 +32,24 @@ def main():
     
     # ヘッダー
     st.title("🎯 YOLO データセット分析ツール")
-    st.markdown("**初心者向け** - フォルダを選ぶだけで簡単分析！")
-    st.markdown("---")
+    st.markdown("**初心者向け** - フォルダを選ぶだけで簡単分析＆変換！")
+    
+    # タブで機能切り替え
+    tab1, tab2 = st.tabs(["📊 分析", "🔄 YOLO変換"])
+    
+    with tab1:
+        show_analysis_tab()
+    
+    with tab2:
+        show_conversion_tab()
+
+
+def show_analysis_tab():
+    """分析タブの内容"""
     
     # サイドバー: 設定
     with st.sidebar:
-        st.header("⚙️ 設定")
+        st.header("📊 分析設定")
         
         # フォルダ選択
         folder_path = get_folder_input()
@@ -71,6 +84,280 @@ def main():
         analyze_and_display(folder_path, target_accuracy, image_size)
     else:
         show_welcome_page()
+
+
+def show_conversion_tab():
+    """YOLO変換タブの内容"""
+    
+    # サイドバー: 変換設定
+    with st.sidebar:
+        st.header("🔄 変換設定")
+        
+        # 入力フォルダ選択
+        input_folder = st.text_input(
+            "📁 入力フォルダ（labelme形式）",
+            placeholder="C:\\path\\to\\labelme\\dataset",
+            help="画像とJSONファイルが入っているフォルダ"
+        )
+        
+        # 出力フォルダ選択
+        output_folder = st.text_input(
+            "📂 出力フォルダ（YOLO形式）",
+            placeholder="C:\\path\\to\\yolo\\dataset",
+            help="YOLO形式データセットの保存先"
+        )
+        
+        # 変換設定
+        st.subheader("⚙️ 変換オプション")
+        
+        train_ratio = st.slider(
+            "📈 訓練データ割合",
+            min_value=0.5,
+            max_value=0.95,
+            value=0.8,
+            step=0.05,
+            help="残りが検証データになります"
+        )
+        
+        copy_images = st.checkbox(
+            "🖼️ 画像ファイルもコピー",
+            value=True,
+            help="チェックを外すとラベルファイルのみ生成"
+        )
+        
+        # 変換実行ボタン
+        convert_button = st.button(
+            "🚀 YOLO形式に変換", 
+            type="primary", 
+            use_container_width=True,
+            disabled=not (input_folder and output_folder)
+        )
+    
+    # メインエリア
+    if convert_button and input_folder and output_folder:
+        perform_conversion(input_folder, output_folder, train_ratio, copy_images)
+    else:
+        show_conversion_help()
+
+
+def show_conversion_help():
+    """変換機能のヘルプページ"""
+    st.markdown("""
+    ## 🔄 YOLO形式変換機能
+    
+    labelme形式のアノテーションデータをYOLOv9で使用できる形式に変換します。
+    
+    ### 📋 変換前の準備
+    
+    **入力データ（labelme形式）:**
+    ```
+    input_folder/
+    ├── image1.jpg
+    ├── image1.json
+    ├── image2.jpg
+    ├── image2.json
+    └── ...
+    ```
+    
+    ### 📦 変換後の出力
+    
+    **出力データ（YOLO形式）:**
+    ```
+    output_folder/
+    ├── images/
+    │   ├── train/          # 訓練用画像
+    │   └── val/            # 検証用画像
+    ├── labels/
+    │   ├── train/          # 訓練用ラベル(.txt)
+    │   └── val/            # 検証用ラベル(.txt)
+    ├── dataset.yaml        # YOLOv9設定ファイル
+    ├── classes.names       # クラス名一覧
+    └── README.txt          # 使用方法
+    ```
+    
+    ### ✨ 主な機能
+    
+    - 📊 **自動train/val分割**: 指定した割合で自動分割
+    - 🎯 **座標変換**: labelme → YOLO形式の座標変換
+    - 📝 **設定ファイル生成**: dataset.yaml等を自動生成
+    - ✅ **検証機能**: 変換結果の妥当性チェック
+    
+    ### 🚀 YOLOv9での使用方法
+    
+    変換後、YOLOv9で以下のように学習できます：
+    
+    ```bash
+    python train.py --data /path/to/output_folder/dataset.yaml
+    ```
+    """)
+    
+    st.info("💡 左側のサイドバーで入力・出力フォルダを指定して「変換」ボタンを押してください")
+
+
+def perform_conversion(input_folder: str, output_folder: str, train_ratio: float, copy_images: bool):
+    """YOLO変換を実行"""
+    
+    # プログレスバー
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    try:
+        status_text.text("🔍 入力フォルダを検証中...")
+        progress_bar.progress(10)
+        
+        # 入力フォルダ検証
+        validation = validate_folder_structure(input_folder)
+        if not validation['valid']:
+            st.error("❌ 入力フォルダに問題があります:")
+            for error in validation['errors']:
+                st.error(f"• {error}")
+            return
+        
+        status_text.text("🔄 変換処理を開始中...")
+        progress_bar.progress(25)
+        
+        # 変換実行
+        converter = YOLOConverter()
+        
+        status_text.text("📁 ファイルを変換中...")
+        progress_bar.progress(50)
+        
+        result = converter.convert_dataset(
+            input_folder=input_folder,
+            output_folder=output_folder,
+            train_ratio=train_ratio,
+            copy_images=copy_images
+        )
+        
+        status_text.text("📊 結果を表示中...")
+        progress_bar.progress(75)
+        
+        # 結果表示
+        display_conversion_results(result)
+        
+        progress_bar.progress(100)
+        status_text.text("✅ 変換完了！")
+        
+        # 少し待ってからクリア
+        import time
+        time.sleep(2)
+        progress_bar.empty()
+        status_text.empty()
+        
+    except Exception as e:
+        st.error(f"❌ 変換中にエラーが発生しました: {str(e)}")
+        progress_bar.empty()
+        status_text.empty()
+
+
+def display_conversion_results(result: dict):
+    """変換結果の表示"""
+    
+    if result['変換成功']:
+        st.success("🎉 YOLO形式への変換が完了しました！")
+        
+        # 統計情報
+        st.header("📊 変換統計")
+        
+        stats = result['統計情報']
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("変換成功", stats['変換成功画像数'])
+        with col2:
+            st.metric("訓練データ", stats['訓練データ数'])
+        with col3:
+            st.metric("検証データ", stats['検証データ数'])
+        with col4:
+            st.metric("クラス数", stats['クラス数'])
+        
+        # クラス分布
+        st.subheader("🎯 クラス分布")
+        class_df = pd.DataFrame(
+            list(result['クラス情報'].items()),
+            columns=['クラス名', 'アノテーション数']
+        )
+        
+        # 棒グラフ
+        fig = px.bar(
+            class_df,
+            x='クラス名',
+            y='アノテーション数',
+            title="クラス別アノテーション数"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # データフレーム表示
+        st.dataframe(class_df, use_container_width=True, hide_index=True)
+        
+        # 出力ファイル情報
+        st.header("📁 生成ファイル")
+        
+        output_files = result['出力ファイル']
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.info(f"📂 **出力フォルダ**: {result['出力フォルダ']}")
+            st.info(f"📝 **設定ファイル**: dataset.yaml")
+            st.info(f"📋 **クラス一覧**: classes.names")
+        
+        with col2:
+            st.info(f"🖼️ **画像フォルダ**: images/train, images/val")
+            st.info(f"🏷️ **ラベルフォルダ**: labels/train, labels/val") 
+            st.info(f"📄 **説明書**: README.txt")
+        
+        # YOLOv9学習コマンド
+        st.header("🚀 次のステップ")
+        
+        dataset_yaml_path = output_files['dataset.yaml']
+        
+        st.subheader("YOLOv9での学習コマンド")
+        st.code(f"python train.py --data {dataset_yaml_path}", language="bash")
+        
+        # エラー・警告
+        if result['エラー']:
+            st.warning("⚠️ 変換中に以下の問題が発生しました:")
+            for error in result['エラー']:
+                st.warning(f"• {error}")
+        
+        # 検証実行
+        st.subheader("✅ データセット検証")
+        if st.button("🔍 変換結果を検証"):
+            converter = YOLOConverter()
+            validation = converter.validate_yolo_dataset(result['出力フォルダ'])
+            
+            if validation['valid']:
+                st.success("✅ データセットは正常です")
+                
+                # 統計表示
+                val_stats = validation['statistics']
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    st.metric("訓練画像", val_stats['訓練画像数'])
+                with col2:
+                    st.metric("検証画像", val_stats['検証画像数'])
+                with col3:
+                    st.metric("訓練ラベル", val_stats['訓練ラベル数'])
+                with col4:
+                    st.metric("検証ラベル", val_stats['検証ラベル数'])
+                
+            else:
+                st.error("❌ データセットに問題があります:")
+                for error in validation['errors']:
+                    st.error(f"• {error}")
+            
+            # 警告表示
+            for warning in validation['warnings']:
+                st.warning(f"⚠️ {warning}")
+    
+    else:
+        st.error("❌ 変換に失敗しました")
+        if 'エラー' in result:
+            for error in result['エラー']:
+                st.error(f"• {error}")
 
 
 def get_folder_input():

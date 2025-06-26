@@ -1,9 +1,10 @@
-# YOLOデータセット分析ツール - 最小構成
+# YOLOデータセット分析ツール - 機能拡張版
 streamlit==1.28.0
 pandas==2.0.3
 pillow==10.0.0
 plotly==5.15.0
 numpy==1.24.3
+pyyaml==6.0
 
 # 開発用（オプション）
 # pytest==7.4.0
